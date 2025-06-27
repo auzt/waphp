@@ -1,2 +1,29 @@
 [27-Jun-2025 14:24:38 Asia/Jakarta] PHP Fatal error:  Cannot redeclare getClientIp() (previously declared in C:\xampp8.1.6\htdocs\wanew\includes\functions.php:417) in C:\xampp8.1.6\htdocs\wanew\includes\session.php on line 231
 [27-Jun-2025 14:24:39 Asia/Jakarta] PHP Fatal error:  Cannot redeclare getClientIp() (previously declared in C:\xampp8.1.6\htdocs\wanew\includes\functions.php:417) in C:\xampp8.1.6\htdocs\wanew\includes\session.php on line 231
+[27-Jun-2025 14:36:56 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:36:56 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:36:56 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:41:08 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:41:08 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:41:08 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:41:08 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:42:21 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:42:21 Asia/Jakarta] Login error trace: #0 C:\xampp8.1.6\htdocs\wanew\classes\Auth.php(308): PDO->prepare('\r\n            S...')
+#1 C:\xampp8.1.6\htdocs\wanew\classes\Auth.php(38): Auth->isAccountLocked('admin')
+#2 C:\xampp8.1.6\htdocs\wanew\debug-login.php(173): Auth->login('admin', 'password')
+#3 {main}
+[27-Jun-2025 14:42:21 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:42:21 Asia/Jakarta] Login error trace: #0 C:\xampp8.1.6\htdocs\wanew\classes\Auth.php(308): PDO->prepare('\r\n            S...')
+#1 C:\xampp8.1.6\htdocs\wanew\classes\Auth.php(38): Auth->isAccountLocked('admin')
+#2 C:\xampp8.1.6\htdocs\wanew\debug-login.php(173): Auth->login('admin', 'admin123')
+#3 {main}
+[27-Jun-2025 14:42:21 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:42:21 Asia/Jakarta] Login error trace: #0 C:\xampp8.1.6\htdocs\wanew\classes\Auth.php(308): PDO->prepare('\r\n            S...')
+#1 C:\xampp8.1.6\htdocs\wanew\classes\Auth.php(38): Auth->isAccountLocked('admin')
+#2 C:\xampp8.1.6\htdocs\wanew\debug-login.php(173): Auth->login('admin', '123456')
+#3 {main}
+[27-Jun-2025 14:42:21 Asia/Jakarta] Login error: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'whatsapp_monitor.login_attempts' doesn't exist
+[27-Jun-2025 14:42:21 Asia/Jakarta] Login error trace: #0 C:\xampp8.1.6\htdocs\wanew\classes\Auth.php(308): PDO->prepare('\r\n            S...')
+#1 C:\xampp8.1.6\htdocs\wanew\classes\Auth.php(38): Auth->isAccountLocked('admin')
+#2 C:\xampp8.1.6\htdocs\wanew\debug-login.php(200): Auth->login('admin', 'password')
+#3 {main}

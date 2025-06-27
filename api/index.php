@@ -78,7 +78,10 @@ try {
     $id = $pathParts[2] ?? null;
 
     // Handle public endpoints (no authentication required)
-    if (in_array($apiPath, ['health', 'status', 'docs', 'documentation'])) {
+    if (
+        in_array($apiPath, ['health', 'status', 'docs', 'documentation']) ||
+        strpos($apiPath, 'system/') === 0
+    ) {
         handlePublicEndpoint($apiPath);
         exit;
     }
@@ -188,6 +191,7 @@ function handlePublicEndpoint($endpoint)
     switch ($endpoint) {
         case 'health':
         case 'status':
+        case 'system/status':
             handleHealthCheck();
             break;
         case 'docs':

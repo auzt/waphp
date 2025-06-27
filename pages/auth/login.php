@@ -18,14 +18,11 @@ if (!defined('APP_ROOT')) {
 }
 
 // Include required files
-require_once APP_ROOT . '/includes/functions.php';
-require_once APP_ROOT . '/includes/session.php';
-require_once APP_ROOT . '/classes/Auth.php';
+require_once APP_ROOT . '/includes/bootstrap.php';
 
 // If user is already logged in, redirect to dashboard
 if (isLoggedIn()) {
-    header('Location: ../dashboard/index.php');
-    exit;
+    redirectTo('pages/dashboard/index.php');
 }
 
 // Initialize variables
@@ -450,16 +447,22 @@ $appName = $_ENV['APP_NAME'] ?? 'WhatsApp Monitor';
         $(document).ready(function() {
             // Check system status
             $.ajax({
-                url: '../../api/system/status.php',
+                url: '../../system-status.php',
                 method: 'GET',
                 timeout: 5000,
                 success: function(response) {
-                    if (response.status !== 'ok') {
-                        showAlert('Sistem sedang mengalami gangguan. Beberapa fitur mungkin tidak berfungsi dengan baik.', 'warning');
+                    if (response.status === 'error') {
+                        showAlert('Sistem mengalami masalah: ' + (response.issues ? response.issues.join(', ') : 'Unknown error'), 'danger');
+                    } else if (response.status === 'warning') {
+                        showAlert('Peringatan sistem: ' + (response.issues ? response.issues.join(', ') : 'System warnings detected'), 'warning');
                     }
+
+                    // Log system info for debugging
+                    console.log('System Status:', response);
                 },
-                error: function() {
+                error: function(xhr, status, error) {
                     // Silently fail - don't show error to user on login page
+                    console.log('System status check failed:', error);
                 }
             });
         });

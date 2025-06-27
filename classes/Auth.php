@@ -97,6 +97,16 @@ class Auth
             ];
         } catch (Exception $e) {
             error_log("Login error: " . $e->getMessage());
+            error_log("Login error trace: " . $e->getTraceAsString());
+
+            // In debug mode, show detailed error
+            if (($_ENV['APP_DEBUG'] ?? 'false') === 'true') {
+                return [
+                    'success' => false,
+                    'message' => 'Debug Error: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine()
+                ];
+            }
+
             return [
                 'success' => false,
                 'message' => 'Terjadi kesalahan sistem. Silakan coba lagi.'

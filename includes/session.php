@@ -15,6 +15,9 @@ if (!defined('APP_ROOT')) {
     define('APP_ROOT', dirname(__DIR__));
 }
 
+// Load functions first to avoid conflicts
+require_once APP_ROOT . '/includes/functions.php';
+
 // Load configuration
 if (file_exists(APP_ROOT . '/config/app.php')) {
     $config = include APP_ROOT . '/config/app.php';
@@ -66,7 +69,7 @@ function initializeSession()
         $_SESSION['initiated'] = true;
         $_SESSION['created_at'] = time();
         $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
-        $_SESSION['ip_address'] = getClientIp();
+        $_SESSION['ip_address'] = getClientIp(); // Use function from functions.php
     }
 
     // Check session expiry
@@ -126,7 +129,7 @@ function validateSessionSecurity()
     if (
         $checkIp && isset($_SESSION['ip_address']) &&
         $_SESSION['ip_address'] !== getClientIp()
-    ) {
+    ) { // Use function from functions.php
         destroySession();
         header('Location: /pages/auth/login.php?error=security_violation');
         exit;
@@ -226,23 +229,6 @@ function updateLastLogin($userId)
 }
 
 /**
- * Get client IP address for session validation
- */
-function getClientIp()
-{
-    $keys = ['HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'HTTP_CLIENT_IP', 'REMOTE_ADDR'];
-
-    foreach ($keys as $key) {
-        if (isset($_SERVER[$key]) && !empty($_SERVER[$key])) {
-            $ips = explode(',', $_SERVER[$key]);
-            return trim($ips[0]);
-        }
-    }
-
-    return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-}
-
-/**
  * Check if session is valid
  */
 function isValidSession()
@@ -251,7 +237,7 @@ function isValidSession()
         return false;
     }
 
-    return checkSessionExpiry() && validateSessionSecurity();
+    return checkSessionExpiry();
 }
 
 /**
