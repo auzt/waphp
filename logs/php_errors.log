@@ -1,0 +1,2 @@
+[27-Jun-2025 14:24:38 Asia/Jakarta] PHP Fatal error:  Cannot redeclare getClientIp() (previously declared in C:\xampp8.1.6\htdocs\wanew\includes\functions.php:417) in C:\xampp8.1.6\htdocs\wanew\includes\session.php on line 231
+[27-Jun-2025 14:24:39 Asia/Jakarta] PHP Fatal error:  Cannot redeclare getClientIp() (previously declared in C:\xampp8.1.6\htdocs\wanew\includes\functions.php:417) in C:\xampp8.1.6\htdocs\wanew\includes\session.php on line 231
