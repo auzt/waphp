@@ -21,18 +21,19 @@ if (file_exists($envFile)) {
             list($key, $value) = explode('=', $line, 2);
             $key = trim($key);
             $value = trim($value, ' "\'');
-            $_ENV[$key] = $value;
-            putenv("$key=$value");
+            if (!array_key_exists($key, $_SERVER) && !array_key_exists($key, $_ENV)) {
+                $_ENV[$key] = $value;
+                putenv("$key=$value");
+            }
         }
     }
 }
 
-// Database Configuration
-$config = [
+// Database Configuration Array
+return [
     // Database Connection Settings
     'database' => [
         'default' => 'mysql',
-
         'connections' => [
             'mysql' => [
                 'driver'    => 'mysql',
@@ -48,47 +49,27 @@ $config = [
                 'engine'    => null,
             ]
         ],
-
-        // Connection Options
+        // PDO Options
         'options' => [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES   => false,
             PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci"
         ],
-
         // Connection Pool Settings
         'pool' => [
             'max_connections' => 10,
-            'timeout'        => 30, // seconds
+            'timeout'        => 30,
             'retry_attempts' => 3,
-            'retry_delay'    => 1   // seconds
+            'retry_delay'    => 1
         ]
     ],
-
-    // Redis Configuration (untuk session dan cache)
+    // Redis Configuration
     'redis' => [
         'host'     => $_ENV['REDIS_HOST'] ?? 'localhost',
         'port'     => $_ENV['REDIS_PORT'] ?? 6379,
         'password' => $_ENV['REDIS_PASS'] ?? null,
         'database' => $_ENV['REDIS_DB'] ?? 0,
         'timeout'  => 5.0,
-    ],
-
-    // Database Migration Settings
-    'migrations' => [
-        'table' => 'migrations',
-        'path'  => APP_ROOT . '/database/migrations'
     ]
 ];
-
-// Validate required database settings
-$required = ['host', 'database', 'username'];
-foreach ($required as $key) {
-    if (empty($config['database']['connections']['mysql'][$key])) {
-        throw new Exception("Database configuration missing: {$key}");
-    }
-}
-
-// Export configuration
-return $config;

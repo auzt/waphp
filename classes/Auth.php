@@ -3,236 +3,239 @@
 /**
  * Authentication Class
  * 
- * Handles user authentication, login, logout, password management
- * Integrates with session management and security features
- * 
- * @author WhatsApp Monitor Team
- * @version 1.0.0
+ * Handles user authentication, authorization, and security features
+ * - Login/logout functionality
+ * - Role-based access control
+ * - Password validation
+ * - Security measures (rate limiting, brute force protection)
  */
 
-// Prevent direct access
-if (!defined('APP_ROOT')) {
-    define('APP_ROOT', dirname(__DIR__));
-}
-
-require_once APP_ROOT . '/config/constants.php';
-require_once APP_ROOT . '/classes/Database.php';
-require_once APP_ROOT . '/classes/User.php';
-require_once APP_ROOT . '/includes/functions.php';
-require_once APP_ROOT . '/includes/session.php';
+require_once __DIR__ . '/Database.php';
+require_once __DIR__ . '/../includes/functions.php';
 
 class Auth
 {
     private $db;
-    private $user;
+    private $maxLoginAttempts = 5;
+    private $lockoutDuration = 900; // 15 minutes
 
     public function __construct()
     {
-        $this->db = Database::getInstance();
-        $this->user = new User();
+        $this->db = Database::getInstance()->getConnection();
+
+        // Load settings from config
+        $this->maxLoginAttempts = $_ENV['MAX_LOGIN_ATTEMPTS'] ?? 5;
+        $this->lockoutDuration = $_ENV['LOCKOUT_DURATION'] ?? 900;
     }
 
-    // =============================================================================
-    // LOGIN & LOGOUT METHODS
-    // =============================================================================
-
     /**
-     * Authenticate user with username/email and password
-     * 
-     * @param string $login Username or email
-     * @param string $password Plain text password
-     * @param bool $rememberMe Whether to set remember me cookie
-     * @return array ['success' => bool, 'message' => string, 'user' => array|null]
+     * Authenticate user login
      */
-    public function login($login, $password, $rememberMe = false)
+    public function login($username, $password, $remember = false)
     {
         try {
-            // Input validation
-            if (empty($login) || empty($password)) {
+            // Check if account is locked
+            if ($this->isAccountLocked($username)) {
                 return [
                     'success' => false,
-                    'message' => 'Username dan password harus diisi',
-                    'user' => null
+                    'message' => 'Akun terkunci karena terlalu banyak percobaan login. Coba lagi dalam 15 menit.',
+                    'locked' => true
                 ];
             }
 
-            // Rate limiting check
-            $clientIp = getClientIpAddress();
-            if (isRateLimited($clientIp) || isRateLimited($login)) {
-                recordLoginAttempt($clientIp, false);
-                recordLoginAttempt($login, false);
-
-                logActivity('login_rate_limited', "Rate limited login attempt for: {$login}", null);
-
-                return [
-                    'success' => false,
-                    'message' => 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.',
-                    'user' => null
-                ];
-            }
-
-            // Find user by username or email
-            $user = $this->findUserByLogin($login);
+            // Get user by username or email
+            $user = $this->getUserByCredential($username);
 
             if (!$user) {
-                recordLoginAttempt($clientIp, false);
-                recordLoginAttempt($login, false);
-
-                logActivity('login_failed', "Login failed - user not found: {$login}", null);
-
+                $this->recordFailedAttempt($username);
                 return [
                     'success' => false,
                     'message' => 'Username atau password salah',
-                    'user' => null
-                ];
-            }
-
-            // Check if user is active
-            if ($user['status'] !== USER_STATUS_ACTIVE) {
-                recordLoginAttempt($clientIp, false);
-                recordLoginAttempt($login, false);
-
-                logActivity('login_failed', "Login failed - inactive user: {$login}", $user['id']);
-
-                $statusMessage = $this->getStatusMessage($user['status']);
-                return [
-                    'success' => false,
-                    'message' => $statusMessage,
-                    'user' => null
+                    'attempts_left' => $this->getRemainingAttempts($username)
                 ];
             }
 
             // Verify password
-            if (!verifyPassword($password, $user['password'])) {
-                recordLoginAttempt($clientIp, false);
-                recordLoginAttempt($login, false);
-
-                // Update failed login attempts in database
-                $this->incrementLoginAttempts($user['id']);
-
-                logActivity('login_failed', "Login failed - invalid password: {$login}", $user['id']);
-
+            if (!password_verify($password, $user['password'])) {
+                $this->recordFailedAttempt($username);
                 return [
                     'success' => false,
                     'message' => 'Username atau password salah',
-                    'user' => null
+                    'attempts_left' => $this->getRemainingAttempts($username)
                 ];
             }
 
-            // Check if account is locked
-            if ($this->isAccountLocked($user['id'])) {
-                recordLoginAttempt($clientIp, false);
-                recordLoginAttempt($login, false);
-
-                logActivity('login_failed', "Login failed - account locked: {$login}", $user['id']);
-
+            // Check if user is active
+            if ($user['status'] !== 'active') {
                 return [
                     'success' => false,
-                    'message' => 'Akun terkunci karena terlalu banyak percobaan login gagal. Coba lagi nanti.',
-                    'user' => null
+                    'message' => 'Akun tidak aktif. Hubungi administrator.'
                 ];
             }
 
-            // Successful login
-            recordLoginAttempt($clientIp, true);
-            recordLoginAttempt($login, true);
+            // Clear failed attempts
+            $this->clearFailedAttempts($username);
 
-            // Reset login attempts
-            $this->resetLoginAttempts($user['id']);
+            // Create session
+            $this->createSession($user, $remember);
 
-            // Check if password needs rehashing
-            if (passwordNeedsRehash($user['password'])) {
-                $this->updatePassword($user['id'], $password);
-            }
-
-            // Create user session
-            loginUser($user, $rememberMe);
-
-            logActivity('login_success', "User logged in successfully: {$user['username']}", $user['id']);
+            // Log successful login
+            $this->logActivity($user['id'], 'login_success', [
+                'ip' => getClientIp(),
+                'user_agent' => getUserAgent()
+            ]);
 
             return [
                 'success' => true,
                 'message' => 'Login berhasil',
-                'user' => $this->sanitizeUserData($user)
+                'user' => [
+                    'id' => $user['id'],
+                    'username' => $user['username'],
+                    'full_name' => $user['full_name'],
+                    'role' => $user['role']
+                ]
             ];
         } catch (Exception $e) {
             error_log("Login error: " . $e->getMessage());
-
             return [
                 'success' => false,
-                'message' => 'Terjadi kesalahan sistem. Silakan coba lagi.',
-                'user' => null
+                'message' => 'Terjadi kesalahan sistem. Silakan coba lagi.'
             ];
         }
     }
 
     /**
-     * Logout current user
-     * 
-     * @return array ['success' => bool, 'message' => string]
+     * Logout user
      */
     public function logout()
     {
+        if ($this->isLoggedIn()) {
+            $userId = $_SESSION['user_id'];
+
+            // Log logout activity
+            $this->logActivity($userId, 'logout', [
+                'ip' => getClientIp()
+            ]);
+
+            // Destroy session
+            $this->destroySession();
+        }
+
+        return ['success' => true, 'message' => 'Logout berhasil'];
+    }
+
+    /**
+     * Check if user is logged in
+     */
+    public function isLoggedIn()
+    {
+        return isset($_SESSION['user_id']) && !empty($_SESSION['user_id']);
+    }
+
+    /**
+     * Get current logged in user
+     */
+    public function getCurrentUser()
+    {
+        if (!$this->isLoggedIn()) {
+            return null;
+        }
+
         try {
-            if (!isLoggedIn()) {
-                return [
-                    'success' => false,
-                    'message' => 'User tidak sedang login'
-                ];
-            }
+            $stmt = $this->db->prepare("
+                SELECT id, username, email, full_name, role, status, last_login 
+                FROM users 
+                WHERE id = ? AND status = 'active'
+            ");
+            $stmt->execute([$_SESSION['user_id']]);
 
-            $userId = getCurrentUserId();
-            $username = $_SESSION['username'] ?? 'unknown';
-
-            // Logout user (handled by session.php)
-            logoutUser();
-
-            return [
-                'success' => true,
-                'message' => 'Logout berhasil'
-            ];
+            return $stmt->fetch(PDO::FETCH_ASSOC);
         } catch (Exception $e) {
-            error_log("Logout error: " . $e->getMessage());
-
-            return [
-                'success' => false,
-                'message' => 'Terjadi kesalahan saat logout'
-            ];
+            error_log("Get current user error: " . $e->getMessage());
+            return null;
         }
     }
 
-    // =============================================================================
-    // PASSWORD MANAGEMENT
-    // =============================================================================
+    /**
+     * Check if user has specific role
+     */
+    public function hasRole($role)
+    {
+        $user = $this->getCurrentUser();
+        if (!$user) return false;
+
+        $roleHierarchy = [
+            'viewer' => 1,
+            'operator' => 2,
+            'admin' => 3
+        ];
+
+        $userLevel = $roleHierarchy[$user['role']] ?? 0;
+        $requiredLevel = $roleHierarchy[$role] ?? 999;
+
+        return $userLevel >= $requiredLevel;
+    }
+
+    /**
+     * Check if user can access resource
+     */
+    public function canAccess($resource, $action = 'read')
+    {
+        $user = $this->getCurrentUser();
+        if (!$user) return false;
+
+        // Define permissions matrix
+        $permissions = [
+            'admin' => ['*'],
+            'operator' => [
+                'devices.*',
+                'messages.*',
+                'contacts.*',
+                'api_tokens.*',
+                'logs.read',
+                'dashboard.read',
+                'profile.*'
+            ],
+            'viewer' => [
+                'devices.read',
+                'messages.read',
+                'logs.read',
+                'dashboard.read',
+                'profile.*'
+            ]
+        ];
+
+        $userPerms = $permissions[$user['role']] ?? [];
+
+        // Check wildcard permission
+        if (in_array('*', $userPerms)) return true;
+
+        // Check specific permission
+        $permission = $resource . '.' . $action;
+        if (in_array($permission, $userPerms)) return true;
+
+        // Check resource wildcard
+        $resourceWildcard = $resource . '.*';
+        if (in_array($resourceWildcard, $userPerms)) return true;
+
+        return false;
+    }
 
     /**
      * Change user password
-     * 
-     * @param int $userId
-     * @param string $currentPassword
-     * @param string $newPassword
-     * @return array ['success' => bool, 'message' => string]
      */
-    public function changePassword($userId, $currentPassword, $newPassword)
+    public function changePassword($currentPassword, $newPassword)
     {
+        if (!$this->isLoggedIn()) {
+            return ['success' => false, 'message' => 'Silakan login terlebih dahulu'];
+        }
+
         try {
-            // Get user data
-            $user = $this->user->getById($userId);
-            if (!$user) {
-                return [
-                    'success' => false,
-                    'message' => 'User tidak ditemukan'
-                ];
-            }
+            $user = $this->getCurrentUser();
 
             // Verify current password
-            if (!verifyPassword($currentPassword, $user['password'])) {
-                logActivity('password_change_failed', "Invalid current password", $userId);
-
-                return [
-                    'success' => false,
-                    'message' => 'Password saat ini salah'
-                ];
+            if (!password_verify($currentPassword, $this->getUserPassword($user['id']))) {
+                return ['success' => false, 'message' => 'Password lama salah'];
             }
 
             // Validate new password
@@ -245,443 +248,289 @@ class Auth
             }
 
             // Update password
-            $hashedPassword = hashPassword($newPassword);
-            $updated = $this->updatePassword($userId, $newPassword);
+            $hashedPassword = password_hash($newPassword, PASSWORD_ARGON2ID);
 
-            if ($updated) {
-                logActivity('password_changed', "Password changed successfully", $userId);
+            $stmt = $this->db->prepare("UPDATE users SET password = ?, updated_at = NOW() WHERE id = ?");
+            $stmt->execute([$hashedPassword, $user['id']]);
 
-                return [
-                    'success' => true,
-                    'message' => 'Password berhasil diubah'
-                ];
-            } else {
-                return [
-                    'success' => false,
-                    'message' => 'Gagal mengubah password'
-                ];
-            }
+            // Log password change
+            $this->logActivity($user['id'], 'password_changed', ['ip' => getClientIp()]);
+
+            return ['success' => true, 'message' => 'Password berhasil diubah'];
         } catch (Exception $e) {
             error_log("Change password error: " . $e->getMessage());
-
-            return [
-                'success' => false,
-                'message' => 'Terjadi kesalahan sistem'
-            ];
+            return ['success' => false, 'message' => 'Terjadi kesalahan sistem'];
         }
     }
 
     /**
-     * Reset password (admin function)
-     * 
-     * @param int $userId
-     * @param string $newPassword
-     * @return array ['success' => bool, 'message' => string]
+     * Get user by username or email
      */
-    public function resetPassword($userId, $newPassword)
+    private function getUserByCredential($credential)
     {
-        try {
-            // Check if user exists
-            $user = $this->user->getById($userId);
-            if (!$user) {
-                return [
-                    'success' => false,
-                    'message' => 'User tidak ditemukan'
-                ];
-            }
-
-            // Validate new password
-            $validation = validatePassword($newPassword);
-            if (!$validation['valid']) {
-                return [
-                    'success' => false,
-                    'message' => 'Password tidak valid: ' . implode(', ', $validation['errors'])
-                ];
-            }
-
-            // Update password
-            $updated = $this->updatePassword($userId, $newPassword);
-
-            if ($updated) {
-                // Reset login attempts
-                $this->resetLoginAttempts($userId);
-
-                // Terminate all sessions for this user
-                $this->terminateAllUserSessions($userId);
-
-                logActivity('password_reset', "Password reset by admin for user: {$user['username']}", $userId);
-
-                return [
-                    'success' => true,
-                    'message' => 'Password berhasil direset'
-                ];
-            } else {
-                return [
-                    'success' => false,
-                    'message' => 'Gagal mereset password'
-                ];
-            }
-        } catch (Exception $e) {
-            error_log("Reset password error: " . $e->getMessage());
-
-            return [
-                'success' => false,
-                'message' => 'Terjadi kesalahan sistem'
-            ];
-        }
-    }
-
-    // =============================================================================
-    // ACCOUNT MANAGEMENT
-    // =============================================================================
-
-    /**
-     * Lock user account
-     * 
-     * @param int $userId
-     * @param string $reason
-     * @return bool
-     */
-    public function lockAccount($userId, $reason = 'Administrative action')
-    {
-        try {
-            $lockUntil = date('Y-m-d H:i:s', time() + LOCKOUT_DURATION);
-
-            $updated = $this->db->update("
-                UPDATE users 
-                SET locked_until = ?, login_attempts = ?
-                WHERE id = ?
-            ", [$lockUntil, MAX_LOGIN_ATTEMPTS, $userId]);
-
-            if ($updated) {
-                // Terminate all sessions
-                $this->terminateAllUserSessions($userId);
-
-                logActivity('account_locked', "Account locked: {$reason}", $userId);
-                return true;
-            }
-
-            return false;
-        } catch (Exception $e) {
-            error_log("Lock account error: " . $e->getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Unlock user account
-     * 
-     * @param int $userId
-     * @return bool
-     */
-    public function unlockAccount($userId)
-    {
-        try {
-            $updated = $this->db->update("
-                UPDATE users 
-                SET locked_until = NULL, login_attempts = 0
-                WHERE id = ?
-            ", [$userId]);
-
-            if ($updated) {
-                logActivity('account_unlocked', "Account unlocked", $userId);
-                return true;
-            }
-
-            return false;
-        } catch (Exception $e) {
-            error_log("Unlock account error: " . $e->getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Enable or disable user account
-     * 
-     * @param int $userId
-     * @param string $status
-     * @return bool
-     */
-    public function setAccountStatus($userId, $status)
-    {
-        try {
-            if (!in_array($status, [USER_STATUS_ACTIVE, USER_STATUS_INACTIVE, USER_STATUS_SUSPENDED])) {
-                return false;
-            }
-
-            $updated = $this->db->update("UPDATE users SET status = ? WHERE id = ?", [$status, $userId]);
-
-            if ($updated) {
-                // Terminate sessions if account is disabled
-                if ($status !== USER_STATUS_ACTIVE) {
-                    $this->terminateAllUserSessions($userId);
-                }
-
-                logActivity('account_status_changed', "Account status changed to: {$status}", $userId);
-                return true;
-            }
-
-            return false;
-        } catch (Exception $e) {
-            error_log("Set account status error: " . $e->getMessage());
-            return false;
-        }
-    }
-
-    // =============================================================================
-    // TWO-FACTOR AUTHENTICATION (FUTURE FEATURE)
-    // =============================================================================
-
-    /**
-     * Enable two-factor authentication
-     * 
-     * @param int $userId
-     * @return array ['success' => bool, 'secret' => string|null, 'qr_code' => string|null]
-     */
-    public function enableTwoFactor($userId)
-    {
-        // TODO: Implement 2FA with TOTP
-        return [
-            'success' => false,
-            'message' => 'Two-factor authentication akan segera tersedia',
-            'secret' => null,
-            'qr_code' => null
-        ];
-    }
-
-    /**
-     * Disable two-factor authentication
-     * 
-     * @param int $userId
-     * @return bool
-     */
-    public function disableTwoFactor($userId)
-    {
-        // TODO: Implement 2FA disable
-        return false;
-    }
-
-    // =============================================================================
-    // HELPER METHODS
-    // =============================================================================
-
-    /**
-     * Find user by username or email
-     * 
-     * @param string $login
-     * @return array|null
-     */
-    private function findUserByLogin($login)
-    {
-        // Try username first
-        $user = $this->db->selectOne("SELECT * FROM users WHERE username = ? AND status != 'deleted'", [$login]);
-
-        // If not found, try email
-        if (!$user && isValidEmail($login)) {
-            $user = $this->db->selectOne("SELECT * FROM users WHERE email = ? AND status != 'deleted'", [$login]);
-        }
-
-        return $user;
-    }
-
-    /**
-     * Update user password
-     * 
-     * @param int $userId
-     * @param string $password
-     * @return bool
-     */
-    private function updatePassword($userId, $password)
-    {
-        $hashedPassword = hashPassword($password);
-
-        return $this->db->update("
-            UPDATE users 
-            SET password = ?, password_changed_at = NOW(), updated_at = NOW()
-            WHERE id = ?
-        ", [$hashedPassword, $userId]) > 0;
-    }
-
-    /**
-     * Check if account is locked
-     * 
-     * @param int $userId
-     * @return bool
-     */
-    private function isAccountLocked($userId)
-    {
-        $user = $this->db->selectOne("
-            SELECT login_attempts, locked_until 
+        $stmt = $this->db->prepare("
+            SELECT id, username, email, password, full_name, role, status 
             FROM users 
-            WHERE id = ?
-        ", [$userId]);
+            WHERE (username = ? OR email = ?) AND status = 'active'
+        ");
+        $stmt->execute([$credential, $credential]);
 
-        if (!$user) {
-            return true;
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Get user password hash
+     */
+    private function getUserPassword($userId)
+    {
+        $stmt = $this->db->prepare("SELECT password FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $result ? $result['password'] : null;
+    }
+
+    /**
+     * Check if account is locked due to failed attempts
+     */
+    private function isAccountLocked($username)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*) as attempts 
+            FROM login_attempts 
+            WHERE username = ? AND attempt_time > DATE_SUB(NOW(), INTERVAL ? SECOND)
+        ");
+        $stmt->execute([$username, $this->lockoutDuration]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $result['attempts'] >= $this->maxLoginAttempts;
+    }
+
+    /**
+     * Record failed login attempt
+     */
+    private function recordFailedAttempt($username)
+    {
+        try {
+            $stmt = $this->db->prepare("
+                INSERT INTO login_attempts (username, ip_address, user_agent, attempt_time) 
+                VALUES (?, ?, ?, NOW())
+            ");
+            $stmt->execute([
+                $username,
+                getClientIp(),
+                getUserAgent()
+            ]);
+        } catch (Exception $e) {
+            error_log("Failed to record login attempt: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Clear failed attempts for user
+     */
+    private function clearFailedAttempts($username)
+    {
+        try {
+            $stmt = $this->db->prepare("DELETE FROM login_attempts WHERE username = ?");
+            $stmt->execute([$username]);
+        } catch (Exception $e) {
+            error_log("Failed to clear login attempts: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Get remaining login attempts
+     */
+    private function getRemainingAttempts($username)
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*) as attempts 
+            FROM login_attempts 
+            WHERE username = ? AND attempt_time > DATE_SUB(NOW(), INTERVAL ? SECOND)
+        ");
+        $stmt->execute([$username, $this->lockoutDuration]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return max(0, $this->maxLoginAttempts - $result['attempts']);
+    }
+
+    /**
+     * Create user session
+     */
+    private function createSession($user, $remember = false)
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
         }
 
-        // Check if manually locked
-        if ($user['locked_until'] && strtotime($user['locked_until']) > time()) {
-            return true;
+        // Regenerate session ID for security
+        session_regenerate_id(true);
+
+        // Set session data
+        $_SESSION['user_id'] = $user['id'];
+        $_SESSION['username'] = $user['username'];
+        $_SESSION['email'] = $user['email'];
+        $_SESSION['full_name'] = $user['full_name'];
+        $_SESSION['role'] = $user['role'];
+        $_SESSION['login_time'] = time();
+        $_SESSION['last_activity'] = time();
+
+        // Set remember me cookie if requested
+        if ($remember) {
+            $token = bin2hex(random_bytes(32));
+            $expires = time() + (30 * 24 * 60 * 60); // 30 days
+
+            setcookie('remember_token', $token, $expires, '/', '', false, true);
+
+            // Store token in database
+            $this->storeRememberToken($user['id'], $token, $expires);
         }
 
-        // Check if auto-locked due to failed attempts
-        return $user['login_attempts'] >= MAX_LOGIN_ATTEMPTS;
+        // Store session in database
+        $this->storeSession($user['id']);
     }
 
     /**
-     * Increment login attempts
-     * 
-     * @param int $userId
-     * @return void
+     * Store session in database
      */
-    private function incrementLoginAttempts($userId)
+    private function storeSession($userId)
     {
-        $this->db->execute("
-            UPDATE users 
-            SET login_attempts = login_attempts + 1,
-                locked_until = CASE 
-                    WHEN login_attempts + 1 >= ? THEN DATE_ADD(NOW(), INTERVAL ? SECOND)
-                    ELSE locked_until 
-                END
-            WHERE id = ?
-        ", [MAX_LOGIN_ATTEMPTS, LOCKOUT_DURATION, $userId]);
+        try {
+            $sessionId = session_id();
+            $expiresAt = date('Y-m-d H:i:s', time() + ini_get('session.gc_maxlifetime'));
+
+            $stmt = $this->db->prepare("
+                INSERT INTO user_sessions (user_id, session_id, ip_address, user_agent, expires_at) 
+                VALUES (?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE 
+                ip_address = VALUES(ip_address),
+                user_agent = VALUES(user_agent),
+                expires_at = VALUES(expires_at)
+            ");
+
+            $stmt->execute([
+                $userId,
+                $sessionId,
+                getClientIp(),
+                getUserAgent(),
+                $expiresAt
+            ]);
+        } catch (Exception $e) {
+            error_log("Failed to store session: " . $e->getMessage());
+        }
     }
 
     /**
-     * Reset login attempts
-     * 
-     * @param int $userId
-     * @return void
+     * Store remember token
      */
-    private function resetLoginAttempts($userId)
+    private function storeRememberToken($userId, $token, $expires)
     {
-        $this->db->update("
-            UPDATE users 
-            SET login_attempts = 0, locked_until = NULL 
-            WHERE id = ?
-        ", [$userId]);
+        try {
+            $stmt = $this->db->prepare("
+                INSERT INTO remember_tokens (user_id, token, expires_at) 
+                VALUES (?, ?, ?)
+            ");
+            $stmt->execute([$userId, hash('sha256', $token), date('Y-m-d H:i:s', $expires)]);
+        } catch (Exception $e) {
+            error_log("Failed to store remember token: " . $e->getMessage());
+        }
     }
 
     /**
-     * Terminate all sessions for a user
-     * 
-     * @param int $userId
-     * @return int Number of terminated sessions
+     * Destroy session
      */
-    private function terminateAllUserSessions($userId)
+    private function destroySession()
     {
-        return $this->db->delete("DELETE FROM user_sessions WHERE user_id = ?", [$userId]);
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        // Remove session from database
+        $this->removeSession(session_id());
+
+        // Clear session data
+        $_SESSION = [];
+
+        // Delete session cookie
+        if (ini_get("session.use_cookies")) {
+            $params = session_get_cookie_params();
+            setcookie(
+                session_name(),
+                '',
+                time() - 42000,
+                $params["path"],
+                $params["domain"],
+                $params["secure"],
+                $params["httponly"]
+            );
+        }
+
+        // Delete remember token cookie
+        setcookie('remember_token', '', time() - 3600, '/', '', false, true);
+
+        // Destroy session
+        session_destroy();
     }
 
     /**
-     * Get status message for user status
-     * 
-     * @param string $status
-     * @return string
+     * Remove session from database
      */
-    private function getStatusMessage($status)
+    private function removeSession($sessionId)
     {
-        $messages = [
-            USER_STATUS_INACTIVE => 'Akun tidak aktif. Hubungi administrator.',
-            USER_STATUS_SUSPENDED => 'Akun ditangguhkan. Hubungi administrator.',
-            USER_STATUS_PENDING => 'Akun menunggu aktivasi.',
-        ];
-
-        return $messages[$status] ?? 'Status akun tidak valid.';
+        try {
+            $stmt = $this->db->prepare("DELETE FROM user_sessions WHERE session_id = ?");
+            $stmt->execute([$sessionId]);
+        } catch (Exception $e) {
+            error_log("Failed to remove session: " . $e->getMessage());
+        }
     }
 
     /**
-     * Sanitize user data for response
-     * 
-     * @param array $user
-     * @return array
+     * Log user activity
      */
-    private function sanitizeUserData($user)
+    private function logActivity($userId, $action, $data = [])
     {
-        unset($user['password']);
-        unset($user['two_factor_secret']);
+        try {
+            $stmt = $this->db->prepare("
+                INSERT INTO activity_logs (user_id, action, data, ip_address, user_agent, created_at) 
+                VALUES (?, ?, ?, ?, ?, NOW())
+            ");
 
-        return $user;
-    }
-
-    // =============================================================================
-    // STATIC HELPER METHODS
-    // =============================================================================
-
-    /**
-     * Check if user is authenticated
-     * 
-     * @return bool
-     */
-    public static function check()
-    {
-        return isLoggedIn();
+            $stmt->execute([
+                $userId,
+                $action,
+                json_encode($data),
+                getClientIp(),
+                getUserAgent()
+            ]);
+        } catch (Exception $e) {
+            error_log("Failed to log activity: " . $e->getMessage());
+        }
     }
 
     /**
-     * Get current authenticated user
-     * 
-     * @return array|null
+     * Clean expired sessions and tokens
      */
-    public static function user()
+    public function cleanup()
     {
-        return getCurrentUser();
-    }
+        try {
+            // Clean expired sessions
+            $stmt = $this->db->prepare("DELETE FROM user_sessions WHERE expires_at < NOW()");
+            $stmt->execute();
 
-    /**
-     * Get current user ID
-     * 
-     * @return int|null
-     */
-    public static function id()
-    {
-        return getCurrentUserId();
-    }
+            // Clean expired remember tokens
+            $stmt = $this->db->prepare("DELETE FROM remember_tokens WHERE expires_at < NOW()");
+            $stmt->execute();
 
-    /**
-     * Check if current user has specific role
-     * 
-     * @param string $role
-     * @return bool
-     */
-    public static function hasRole($role)
-    {
-        return hasRole($role);
-    }
+            // Clean old login attempts (older than 24 hours)
+            $stmt = $this->db->prepare("DELETE FROM login_attempts WHERE attempt_time < DATE_SUB(NOW(), INTERVAL 24 HOUR)");
+            $stmt->execute();
 
-    /**
-     * Check if current user has specific permission
-     * 
-     * @param string $permission
-     * @return bool
-     */
-    public static function hasPermission($permission)
-    {
-        $userRole = getCurrentUserRole();
-        return $userRole ? hasPermission($permission, $userRole) : false;
-    }
-
-    /**
-     * Require authentication (redirect if not authenticated)
-     * 
-     * @param string $redirectUrl
-     * @return void
-     */
-    public static function requireAuth($redirectUrl = '/pages/auth/login.php')
-    {
-        requireAuth($redirectUrl);
-    }
-
-    /**
-     * Require specific permission (redirect if not authorized)
-     * 
-     * @param string $permission
-     * @param string $redirectUrl
-     * @return void
-     */
-    public static function requirePermission($permission, $redirectUrl = '/pages/dashboard/')
-    {
-        requirePermission($permission, $redirectUrl);
+            return true;
+        } catch (Exception $e) {
+            error_log("Cleanup error: " . $e->getMessage());
+            return false;
+        }
     }
 }
